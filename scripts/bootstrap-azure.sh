@@ -8,6 +8,9 @@ RG="${RG:-rg-gcubed-foundry}"
 LOC="${LOC:-australiaeast}"
 ID_NAME="${ID_NAME:-id-github-foundry-pipeline}"
 ENV_NAME="${ENV_NAME:-azure}"
+# GitHub may send ID-based OIDC subjects (repo:<owner>@<ownerId>/<repo>@<repoId>:...).
+# The workflow error message shows the exact value; both formats are registered.
+REPO_IDS="${REPO_IDS:-Bozmonster@5046023/foundry-pipeline@1415161671}"
 
 for p in Microsoft.CognitiveServices Microsoft.ContainerRegistry Microsoft.ManagedIdentity; do
   az provider register --namespace "$p" -o none
@@ -16,7 +19,8 @@ RG_ID=$(az group create -n "$RG" -l "$LOC" --query id -o tsv)
 read -r CLIENT_ID PRINCIPAL_ID < <(az identity create -g "$RG" -n "$ID_NAME" -l "$LOC" --query "[clientId,principalId]" -o tsv | tr '\n' ' ')
 echo "identity clientId=$CLIENT_ID principalId=$PRINCIPAL_ID"
 
-for pair in "gh-env-$ENV_NAME=repo:$REPO:environment:$ENV_NAME" "gh-branch-main=repo:$REPO:ref:refs/heads/main"; do
+for pair in "gh-env-$ENV_NAME=repo:$REPO:environment:$ENV_NAME" "gh-branch-main=repo:$REPO:ref:refs/heads/main" \
+            "gh-id-env-$ENV_NAME=repo:$REPO_IDS:environment:$ENV_NAME" "gh-id-branch-main=repo:$REPO_IDS:ref:refs/heads/main"; do
   az identity federated-credential create -g "$RG" --identity-name "$ID_NAME" --name "${pair%%=*}" \
     --issuer https://token.actions.githubusercontent.com --subject "${pair#*=}" \
     --audiences api://AzureADTokenExchange -o none && echo "federated: ${pair#*=}"

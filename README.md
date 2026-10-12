@@ -26,11 +26,25 @@ this repo (API + infra) ────────┘        │                  
 | `scripts/deploy-agent.sh` | Creates or versions the Foundry hosted agent and waits for `active` |
 | `scripts/invoke.sh` | Calls the deployed API |
 
-## One-time setup
+## One-time setup (already done for this repo)
 
-1. `az login`, then run `./scripts/bootstrap-azure.ps1` from PowerShell.
-2. If the GitHub CLI isn't installed, copy the printed values into the repo's **Actions variables**.
-3. Push to `main` or run the workflow manually. It uses OIDC, so it needs no Azure secrets.
+1. **Azure.** Open [Azure Cloud Shell](https://shell.azure.com) (Bash) and run `scripts/bootstrap-azure.sh`. It creates:
+   - resource group `rg-gcubed-foundry` (Australia East)
+   - user-assigned managed identity `id-github-foundry-pipeline`, with GitHub OIDC federated credentials for both the classic and the ID-based subject formats
+   - role assignments on that resource group only: Contributor, Role Based Access Control Administrator, Azure AI Project Manager and Azure AI User. Your own account also gets Azure AI User.
+
+   No Entra app registration is needed. Tenants with security defaults block Graph calls from a local CLI, which is why the setup runs in Cloud Shell. `scripts/bootstrap-azure.ps1` is the PowerShell equivalent.
+2. **GitHub.** Add the printed values as repository **Actions variables**: `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `AZURE_RESOURCE_GROUP` and `AZURE_LOCATION`.
+3. Push to `main`, or run the workflow manually. Bicep creates the ACR, the Foundry resource and project, and the AcrPull roles on the first run.
+
+## Current deployment
+
+| | |
+|---|---|
+| Project endpoint | `https://gcubed-foundry-oicwmmodcn6e2.services.ai.azure.com/api/projects/gcubed-project` |
+| Agent | `gcubed-model` (Foundry hosted agent, Invocations protocol 2.0.0, 1 vCPU / 2 GiB) |
+| Registry | `gcubedacroicwmmodcn6e2.azurecr.io/gcubed-model-api` |
+| First successful run | Actions run #4: 3 min 26 s from push to verified API |
 
 ## API
 

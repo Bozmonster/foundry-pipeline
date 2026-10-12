@@ -15,7 +15,7 @@ on:
   workflow_dispatch:
     inputs:
       model_ref:
-        description: "Branch/tag of Bozmonster/gcubed.com-model-2R to deploy"
+        description: "Branch/tag of the G-Cubed model repo (vars.MODEL_REPO) to deploy"
         default: "main"
       gcubed_tag:
         description: "gcubed package tag in gcubed-public-prerequisites"
@@ -34,7 +34,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  MODEL_REPO: https://github.com/Bozmonster/gcubed.com-model-2R.git
+  MODEL_REPO: ${{ vars.MODEL_REPO || 'https://github.com/Bozmonster/gcubed.com-model-2R.git' }}
   MODEL_REF: ${{ inputs.model_ref || 'main' }}
   GCUBED_TAG: ${{ inputs.gcubed_tag || 'gcubed-5-0-1-4' }}
   AGENT_NAME: gcubed-model
@@ -73,7 +73,7 @@ jobs:
           docker rm -f gcubed
 
       - name: Azure login (OIDC)
-        if: github.event_name != 'workflow_dispatch' || inputs.deploy
+        if: (github.event_name != 'workflow_dispatch' || inputs.deploy) && vars.AZURE_CLIENT_ID != ''
         uses: azure/login@v2
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
@@ -81,7 +81,7 @@ jobs:
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
       - name: Provision infrastructure (Bicep)
-        if: github.event_name != 'workflow_dispatch' || inputs.deploy
+        if: (github.event_name != 'workflow_dispatch' || inputs.deploy) && vars.AZURE_CLIENT_ID != ''
         id: infra
         run: |
           OUT=$(az deployment group create \
@@ -96,7 +96,7 @@ jobs:
           echo "project_endpoint=$(echo "$OUT" | jq -r .projectEndpoint.value)" >> "$GITHUB_OUTPUT"
 
       - name: Push image to ACR
-        if: github.event_name != 'workflow_dispatch' || inputs.deploy
+        if: (github.event_name != 'workflow_dispatch' || inputs.deploy) && vars.AZURE_CLIENT_ID != ''
         run: |
           az acr login --name "${{ steps.infra.outputs.acr_name }}"
           IMAGE="${{ steps.infra.outputs.acr_server }}/$IMAGE_REPO:${{ steps.meta.outputs.tag }}"
@@ -105,13 +105,13 @@ jobs:
           echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
 
       - name: Deploy Foundry hosted agent
-        if: github.event_name != 'workflow_dispatch' || inputs.deploy
+        if: (github.event_name != 'workflow_dispatch' || inputs.deploy) && vars.AZURE_CLIENT_ID != ''
         env:
           PROJECT_ENDPOINT: ${{ steps.infra.outputs.project_endpoint }}
         run: bash scripts/deploy-agent.sh
 
       - name: Smoke test through Foundry API
-        if: github.event_name != 'workflow_dispatch' || inputs.deploy
+        if: (github.event_name != 'workflow_dispatch' || inputs.deploy) && vars.AZURE_CLIENT_ID != ''
         env:
           PROJECT_ENDPOINT: ${{ steps.infra.outputs.project_endpoint }}
         run: |
@@ -128,9 +128,17 @@ jobs:
             echo "- Invoke: \`POST $PROJECT_ENDPOINT/agents/$AGENT_NAME/endpoint/protocols/invocations?api-version=v1\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload sample result
-        if: github.event_name != 'workflow_dispatch' || inputs.deploy
-        uses: actions/upload-artifact@v4
+      - name: Fetch HTML chart reports through Foundry API
+        if: (github.event_name != 'workflow_dispatch' || inputs.deploy) && vars.AZURE_CLIENT_ID != ''
+        env:
+          PROJECT_ENDPOINT: ${{ steps.infra.outputs.project_endpoint }}
+        run: bash scripts/invoke-report.sh examples/inflation-target-shock.json gcubed-report
+
+      - name: Upload sample result and HTML reports
+        if: (github.event_name != 'workflow_dispatch' || inputs.deploy) && vars.AZURE_CLIENT_ID != ''
+        uses: actions/upload-artifact@v5
         with:
           name: gcubed-sample-result
-          path: result.json
+          path: |
+            result.json
+            gcubed-report/

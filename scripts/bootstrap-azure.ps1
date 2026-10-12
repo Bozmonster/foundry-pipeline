@@ -8,7 +8,9 @@
   needs on the resource group, gives you permission to call the API, and
   (if the GitHub CLI is available) sets the repository variables the workflow reads.
 
-  Run from PowerShell with the Azure CLI logged in (az login).
+  Run from PowerShell with the Azure CLI logged in (az login). If your tenant uses
+  security defaults (MFA) and the local CLI is blocked, run scripts/bootstrap-azure.sh
+  in Azure Cloud Shell instead.
 
 .EXAMPLE
   ./scripts/bootstrap-azure.ps1 -Repo Bozmonster/foundry-pipeline
@@ -19,7 +21,9 @@ param(
   [string]$Location = "australiaeast",
   [string]$Environment = "azure",
   [string]$IdentityName = "id-github-foundry-pipeline",
-  [string]$Subscription = ""
+  [string]$Subscription = "",
+  # GitHub may send ID-based OIDC subjects (repo:<owner>@<ownerId>/<repo>@<repoId>:...)
+  [string]$RepoIds = "Bozmonster@5046023/foundry-pipeline@1415161671"
 )
 $ErrorActionPreference = "Continue"
 
@@ -47,6 +51,8 @@ Write-Host "Adding GitHub OIDC federated credentials..."
 $subjects = [ordered]@{
   "gh-env-$Environment" = "repo:${Repo}:environment:$Environment"
   "gh-branch-main"      = "repo:${Repo}:ref:refs/heads/main"
+  "gh-id-env-$Environment" = "repo:${RepoIds}:environment:$Environment"
+  "gh-id-branch-main"      = "repo:${RepoIds}:ref:refs/heads/main"
 }
 foreach ($name in $subjects.Keys) {
   az identity federated-credential create --resource-group $ResourceGroup --identity-name $IdentityName `

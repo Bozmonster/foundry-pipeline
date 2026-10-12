@@ -6,3 +6,6 @@ __pycache__/
 *.tgz
 _to_delete/
 _local/
+setup.env
+gcubed-report/
+result.json
