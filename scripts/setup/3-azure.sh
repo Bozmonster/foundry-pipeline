@@ -46,15 +46,17 @@ info "Resource group"
 RG_ID=$(az group create -n "$AZURE_RESOURCE_GROUP" -l "$AZURE_LOCATION" --query id -o tsv); ok "$RG_ID"
 
 info "Managed identity for GitHub Actions"
-read -r AZURE_CLIENT_ID PRINCIPAL_ID < <(az identity create -g "$AZURE_RESOURCE_GROUP" -n "$IDENTITY_NAME" \
-  -l "$AZURE_LOCATION" --query "[clientId,principalId]" -o tsv | tr '\n' ' ')
+IDENTITY=$(az identity create -g "$AZURE_RESOURCE_GROUP" -n "$IDENTITY_NAME" -l "$AZURE_LOCATION" \
+  --query "[clientId,principalId]" -o tsv)
+AZURE_CLIENT_ID=$(sed -n 1p <<<"$IDENTITY"); PRINCIPAL_ID=$(sed -n 2p <<<"$IDENTITY")
+[ -n "$PRINCIPAL_ID" ] || die "Managed identity creation failed"
 save AZURE_CLIENT_ID; ok "clientId $AZURE_CLIENT_ID"
 
 info "Federated credentials (trust GitHub's OIDC tokens for $PIPELINE_REPO)"
 SUBJECT_PREFIXES=("repo:$PIPELINE_REPO")
 # GitHub may also issue ID-based subjects: repo:<owner>@<ownerId>/<repo>@<repoId>
 IDS=$(curl -fsSL "https://api.github.com/repos/$PIPELINE_REPO" 2>/dev/null | python3 -c \
-  'import json,sys; d=json.load(sys.stdin); print(f"{d["owner"]["login"]}@{d["owner"]["id"]}/{d["name"]}@{d["id"]}")' 2>/dev/null || true)
+  'import json,sys; d=json.load(sys.stdin); print(d["owner"]["login"]+"@"+str(d["owner"]["id"])+"/"+d["name"]+"@"+str(d["id"]))' 2>/dev/null || true)
 if [ -z "$IDS" ] && command -v gh >/dev/null && gh auth status >/dev/null 2>&1; then
   IDS=$(gh api "repos/$PIPELINE_REPO" --jq '"\(.owner.login)@\(.owner.id)/\(.name)@\(.id)"' 2>/dev/null || true)
 fi

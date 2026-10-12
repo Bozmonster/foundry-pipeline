@@ -11,6 +11,10 @@ this repo (API + infra) ────────┘        │                  
                        client ── POST .../agents/gcubed-model/endpoint/protocols/invocations
 ```
 
+## Recreate it from scratch
+
+See **[docs/setup](docs/setup/README.md)**: an interactive script for every component (run in Azure Cloud Shell) and an illustrated manual guide for each one.
+
 ## Repository layout
 
 | Path | Purpose |
