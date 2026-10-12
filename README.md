@@ -21,7 +21,7 @@ this repo (API + infra) ────────┘        │                  
 | `Dockerfile` | Python 3.14.5 + gcubed wheel + model files + API |
 | `infra/main.bicep` | ACR (Basic), Foundry resource and project, and the AcrPull role assignments |
 | `.github/workflows/deploy-gcubed.yml` | Build → local container test → Bicep → push → deploy agent → smoke test |
-| `scripts/bootstrap-azure.ps1` | One-time Azure setup: resource group, OIDC app registration, roles, and GitHub variables |
+| `scripts/bootstrap-azure.ps1` | One-time Azure setup: resource group, managed identity with GitHub OIDC federated credentials, and roles |
 | `scripts/fetch-sources.sh` | Clones the model fork and the gcubed wheel into `model/` and `vendor/` |
 | `scripts/deploy-agent.sh` | Creates or versions the Foundry hosted agent and waits for `active` |
 | `scripts/invoke.sh` | Calls the deployed API |
