@@ -45,7 +45,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: azure
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Fetch G-Cubed model and gcubed wheel
         run: bash scripts/fetch-sources.sh
@@ -73,7 +73,7 @@ jobs:
           docker rm -f gcubed
 
       - name: Azure login (OIDC)
-        if: inputs.deploy != false
+        if: github.event_name != 'workflow_dispatch' || inputs.deploy
         uses: azure/login@v2
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
@@ -81,7 +81,7 @@ jobs:
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
       - name: Provision infrastructure (Bicep)
-        if: inputs.deploy != false
+        if: github.event_name != 'workflow_dispatch' || inputs.deploy
         id: infra
         run: |
           OUT=$(az deployment group create \
@@ -96,7 +96,7 @@ jobs:
           echo "project_endpoint=$(echo "$OUT" | jq -r .projectEndpoint.value)" >> "$GITHUB_OUTPUT"
 
       - name: Push image to ACR
-        if: inputs.deploy != false
+        if: github.event_name != 'workflow_dispatch' || inputs.deploy
         run: |
           az acr login --name "${{ steps.infra.outputs.acr_name }}"
           IMAGE="${{ steps.infra.outputs.acr_server }}/$IMAGE_REPO:${{ steps.meta.outputs.tag }}"
@@ -105,13 +105,13 @@ jobs:
           echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
 
       - name: Deploy Foundry hosted agent
-        if: inputs.deploy != false
+        if: github.event_name != 'workflow_dispatch' || inputs.deploy
         env:
           PROJECT_ENDPOINT: ${{ steps.infra.outputs.project_endpoint }}
         run: bash scripts/deploy-agent.sh
 
       - name: Smoke test through Foundry API
-        if: inputs.deploy != false
+        if: github.event_name != 'workflow_dispatch' || inputs.deploy
         env:
           PROJECT_ENDPOINT: ${{ steps.infra.outputs.project_endpoint }}
         run: |
@@ -129,7 +129,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload sample result
-        if: inputs.deploy != false
+        if: github.event_name != 'workflow_dispatch' || inputs.deploy
         uses: actions/upload-artifact@v4
         with:
           name: gcubed-sample-result
