@@ -1,0 +1,10 @@
+{
+  "action": "run",
+  "name": "USA inflation target +1pp",
+  "variables": ["GDPR", "INFL", "INTN", "EXCH"],
+  "first_year": 2023,
+  "last_year": 2035,
+  "shocks": [
+    { "variable": "INFX(USA)", "value": 1, "start_year": 2024 }
+  ]
+}

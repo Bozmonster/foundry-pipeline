@@ -1,0 +1,8 @@
+model/
+vendor/
+.prereq/
+__pycache__/
+*.pyc
+*.tgz
+_to_delete/
+_local/

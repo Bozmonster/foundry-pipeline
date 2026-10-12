@@ -1,0 +1,136 @@
+name: Deploy G-Cubed to Microsoft Foundry
+
+# Builds the G-Cubed model API container, tests it, pushes it to Azure Container
+# Registry and deploys it as a Microsoft Foundry hosted agent (Invocations API).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "infra/**"
+      - "scripts/**"
+      - "Dockerfile"
+      - ".github/workflows/deploy-gcubed.yml"
+  workflow_dispatch:
+    inputs:
+      model_ref:
+        description: "Branch/tag of Bozmonster/gcubed.com-model-2R to deploy"
+        default: "main"
+      gcubed_tag:
+        description: "gcubed package tag in gcubed-public-prerequisites"
+        default: "gcubed-5-0-1-4"
+      deploy:
+        description: "Deploy to Azure (false = build and test only)"
+        type: boolean
+        default: true
+
+permissions:
+  id-token: write   # OIDC federation to Azure, no stored secrets
+  contents: read
+
+concurrency:
+  group: deploy-gcubed
+  cancel-in-progress: false
+
+env:
+  MODEL_REPO: https://github.com/Bozmonster/gcubed.com-model-2R.git
+  MODEL_REF: ${{ inputs.model_ref || 'main' }}
+  GCUBED_TAG: ${{ inputs.gcubed_tag || 'gcubed-5-0-1-4' }}
+  AGENT_NAME: gcubed-model
+  IMAGE_REPO: gcubed-model-api
+
+jobs:
+  build-test-deploy:
+    runs-on: ubuntu-latest
+    environment: azure
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch G-Cubed model and gcubed wheel
+        run: bash scripts/fetch-sources.sh
+
+      - name: Compute image tag
+        id: meta
+        run: |
+          MODEL_SHA=$(git ls-remote "$MODEL_REPO" "$MODEL_REF" | cut -c1-7)
+          echo "tag=${GITHUB_SHA::7}-m${MODEL_SHA:-unknown}-${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+
+      - name: Build container (solves the model at build time)
+        run: docker build --platform linux/amd64 -t "$IMAGE_REPO:${{ steps.meta.outputs.tag }}" .
+
+      - name: Test container locally
+        run: |
+          docker run -d --name gcubed -p 8088:8088 "$IMAGE_REPO:${{ steps.meta.outputs.tag }}"
+          for i in $(seq 1 30); do curl -sf localhost:8088/readiness && break; sleep 2; done
+          curl -sf -X POST localhost:8088/invocations -H 'Content-Type: application/json' -d '{"action":"health"}'
+          curl -sf -X POST localhost:8088/invocations -H 'Content-Type: application/json' \
+            -d @examples/inflation-target-shock.json | python3 -c '
+          import json,sys; r=json.load(sys.stdin)
+          dev=r["deviation_from_baseline"]["INFL(USA)"]
+          print("INFL(USA) deviation:", dev[:4]); assert abs(dev[1]) > 0.1, "shock had no effect"'
+          docker logs gcubed | tail -20
+          docker rm -f gcubed
+
+      - name: Azure login (OIDC)
+        if: inputs.deploy != false
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Provision infrastructure (Bicep)
+        if: inputs.deploy != false
+        id: infra
+        run: |
+          OUT=$(az deployment group create \
+            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --name gcubed-infra \
+            --template-file infra/main.bicep \
+            --parameters location="${{ vars.AZURE_LOCATION || 'australiaeast' }}" \
+            --query properties.outputs -o json)
+          echo "$OUT"
+          echo "acr_name=$(echo "$OUT" | jq -r .acrName.value)" >> "$GITHUB_OUTPUT"
+          echo "acr_server=$(echo "$OUT" | jq -r .acrLoginServer.value)" >> "$GITHUB_OUTPUT"
+          echo "project_endpoint=$(echo "$OUT" | jq -r .projectEndpoint.value)" >> "$GITHUB_OUTPUT"
+
+      - name: Push image to ACR
+        if: inputs.deploy != false
+        run: |
+          az acr login --name "${{ steps.infra.outputs.acr_name }}"
+          IMAGE="${{ steps.infra.outputs.acr_server }}/$IMAGE_REPO:${{ steps.meta.outputs.tag }}"
+          docker tag "$IMAGE_REPO:${{ steps.meta.outputs.tag }}" "$IMAGE"
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Deploy Foundry hosted agent
+        if: inputs.deploy != false
+        env:
+          PROJECT_ENDPOINT: ${{ steps.infra.outputs.project_endpoint }}
+        run: bash scripts/deploy-agent.sh
+
+      - name: Smoke test through Foundry API
+        if: inputs.deploy != false
+        env:
+          PROJECT_ENDPOINT: ${{ steps.infra.outputs.project_endpoint }}
+        run: |
+          for i in 1 2 3 4 5 6; do
+            bash scripts/invoke.sh '{"action":"health"}' && break
+            echo "retrying in 20s"; sleep 20
+          done
+          bash scripts/invoke.sh @examples/inflation-target-shock.json | tee result.json | head -c 1500
+          python3 -c 'import json; r=json.load(open("result.json")); assert "deviation_from_baseline" in r'
+          {
+            echo "### G-Cubed deployed to Microsoft Foundry"
+            echo "- Project endpoint: \`$PROJECT_ENDPOINT\`"
+            echo "- Agent: \`$AGENT_NAME\`, image: \`$IMAGE\`"
+            echo "- Invoke: \`POST $PROJECT_ENDPOINT/agents/$AGENT_NAME/endpoint/protocols/invocations?api-version=v1\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload sample result
+        if: inputs.deploy != false
+        uses: actions/upload-artifact@v4
+        with:
+          name: gcubed-sample-result
+          path: result.json
